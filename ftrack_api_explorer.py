@@ -1,5 +1,9 @@
+import os
+import requests
+import traceback
 from collections import defaultdict
 from functools import wraps
+from getpass import getuser
 from threading import Thread
 
 import ftrack_api
@@ -7,16 +11,43 @@ from Qt import QtCore, QtGui, QtWidgets
 from vfxwindow import VFXWindow
 
 
-def ftrack_session(func):
-    """Wrap a function in this to ensure a session is created.
-    It requires the session to be a keyword argument.
-    """
+def errorPopup(func):
+    """Create a popup if an error occurs."""
     @wraps(func)
-    def wrapper(*args, **kwargs):
-        if kwargs.get('session'):
-            return func(*args, **kwargs)
-        with ftrack_api.Session() as kwargs['session']:
-            return func(*args, **kwargs)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return func(self, *args, **kwargs)
+
+        except Exception as e:
+            error = str(e)
+
+            # Handle ftrack server errors
+            if isinstance(e, ftrack_api.exception.ServerError):
+                error = error[23:]  # Remove "Server reported error"
+                if 'ftrack-user' in error:
+                    try:
+                        del os.environ['FTRACK_API_USER']
+                    except KeyError:
+                        pass
+                if 'ftrack-api-key' in error:
+                    try:
+                        del os.environ['FTRACK_API_KEY']
+                    except KeyError:
+                        pass
+            if isinstance(e, requests.exceptions.ConnectionError):
+                try:
+                    del os.environ['FTRACK_SERVER']
+                except KeyError:
+                    pass
+
+            # Create a message box with the error
+            msg = QtWidgets.QMessageBox(self)
+            msg.setWindowTitle('Error')
+            msg.setText(error)
+            msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
+            msg.setDetailedText(traceback.format_exc())
+            msg.exec_()
+            raise
     return wrapper
 
 
@@ -111,6 +142,7 @@ class EntityCache(object):
                     cls.load(child)
 
     @classmethod
+    @errorPopup
     def types(cls, session=None):
         """Cache the entity types to avoid opening more sessions."""
         if not cls.Types:
@@ -161,8 +193,7 @@ class FTrackExplorer(VFXWindow):
 
     topLevelEntityAdded = QtCore.Signal()
 
-    @ftrack_session
-    def __init__(self, parent=None, session=None, **kwargs):
+    def __init__(self, parent=None, **kwargs):
         super().__init__(parent=parent, **kwargs)
         self.setWindowPalette('Nuke', 12)
 
@@ -184,7 +215,7 @@ class FTrackExplorer(VFXWindow):
         queryLabel = QtWidgets.QLabel('Query:')
         queryLayout.addWidget(queryLabel)
         self._queryText = QueryEdit()
-        self._queryText.setupCompleter(sorted(EntityCache.types(session=session)))
+        self._queryText.setupCompleter(sorted(EntityCache.types()))
         queryLayout.addWidget(self._queryText)
         queryFirst = QtWidgets.QPushButton('Get First')
         queryLayout.addWidget(queryFirst)
@@ -211,16 +242,35 @@ class FTrackExplorer(VFXWindow):
         queryAll.clicked.connect(self.executeAll)
         queryFirst.clicked.connect(self.executeFirst)
 
+        # Cache environment info
+        # This is so a failed connection can delete a key while still
+        # remembering the original value
+        try:
+            self._ftrack_api_user = os.environ['FTRACK_API_USER']
+        except KeyError:
+            self._ftrack_api_user = getuser()
+        try:
+            self._ftrack_api_key = os.environ['FTRACK_API_KEY']
+        except KeyError:
+            self._ftrack_api_key = ''
+        try:
+            self._ftrack_server = os.environ['FTRACK_SERVER']
+        except KeyError:
+            self._ftrack_server = 'https://company.ftrackapp.com'
+
     def autoPopulate(self):
         """Determine if auto population is allowed."""
         return self._autoPopulate.isChecked()
 
     @QtCore.Slot()
+    @errorPopup
     def executeAll(self):
         """Get all the results of the query."""
         query = self._queryText.text()
         if not query:
             return
+
+        self.checkCredentials()
 
         print(f'Executing {query!r}...')
         with ftrack_api.Session() as session:
@@ -232,11 +282,14 @@ class FTrackExplorer(VFXWindow):
                 return
 
     @QtCore.Slot()
+    @errorPopup
     def executeFirst(self):
         """Get the first result of the query."""
         query = self._queryText.text()
         if not query:
             return
+
+        self.checkCredentials()
 
         print(f'Executing {query!r}...')
         with ftrack_api.Session() as session:
@@ -307,7 +360,28 @@ class FTrackExplorer(VFXWindow):
         except RuntimeError:
             pass
 
+    def checkCredentials(self):
+        """Ensure required environment variables are set."""
+        def createPopup(key, input_type, default_value):
+            if key in os.environ:
+                return False
+
+            text = os.environ.get(key, default_value)
+            value, valid = QtWidgets.QInputDialog.getText(
+                self, f'{input_type[0].upper()+input_type[1:]} required',
+                f'Enter FTrack {input_type}:', text=text,
+            )
+            if not valid:
+                return False
+            os.environ[key] = value
+            return True
+
+        createPopup('FTRACK_SERVER', 'server address', self._ftrack_server)
+        createPopup('FTRACK_API_KEY', 'API Key', self._ftrack_api_key)
+        createPopup('FTRACK_API_USER', 'username', self._ftrack_api_user)
+
     @deferred
+    @errorPopup
     def loadEntity(self, entityType, entityID, key=None, parent=None, _loaded=None):
         """Wrap the load function to allow multiple entities to be added."""
         session = None
