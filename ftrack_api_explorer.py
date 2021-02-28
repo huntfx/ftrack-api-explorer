@@ -81,17 +81,18 @@ class EntityCache(object):
     def load(cls, entity):
         """Add an entity to cache."""
         cache = cls(entity)
+        attributes = type(entity).attributes
         for key in entity.keys():
             if not isKeyLoaded(entity, key):
                 continue
 
             cache[key] = entity[key]
-            if isinstance(entity[key], ftrack_api.entity.base.Entity):
+            attr = attributes.get(key)
+            if isinstance(attr, ftrack_api.attribute.ReferenceAttribute):
                 cls.load(entity[key])
-            elif isinstance(entity[key], ftrack_api.collection.Collection):
+            elif isinstance(attr, ftrack_api.attribute.CollectionAttribute):
                 for child in entity[key]:
-                    if isinstance(child, ftrack_api.entity.base.Entity):
-                        cls.load(child)
+                    cls.load(child)
 
 
 class QueryEdit(QtWidgets.QLineEdit):
@@ -304,15 +305,16 @@ class FTrackExplorer(VFXWindow):
         """Add a new FTrack entity.
         Optionally set key to load a child entity.
         """
-        entityStr = entityRepr(entity)
-        entityCache = EntityCache(entity)
+        name = entityRepr(entity)
+        cache = EntityCache(entity)
+        attributes = type(entity).attributes
 
         # Add a new top level item
         if parent is None:
             root = self._entityData.model().invisibleRootItem()
             parent = self.addItem(root, None, entity, entity, session=session)
             self.topLevelEntityAdded.emit()
-            print(f'Found {entityStr}')
+            print(f'Found {name}')
             EntityCache.load(entity)
 
             # Stop here as we don't want to force load everything
@@ -321,21 +323,22 @@ class FTrackExplorer(VFXWindow):
         if key:
             print(f'Loading data for {key!r}...')
         else:
-            print(f'Loading data for {entityStr}...')
+            print(f'Loading data for {name}...')
 
         # Allow individual keys to be loaded
         if key:
             value = entity[key]
-            if isinstance(value, ftrack_api.entity.base.Entity):
+            attr = attributes.get(key)
+            if isinstance(attr, ftrack_api.attribute.ReferenceAttribute):
                 entity = value
 
-            elif isinstance(value, ftrack_api.collection.Collection):
-                for i, v in enumerate(value):
+            if isinstance(attr, ftrack_api.attribute.CollectionAttribute):
+                for v in value:
                     self.addItem(parent, None, v, v, session=session)
                 print(f'Finished loading {key!r} collection')
                 return
 
-            elif isinstance(value, ftrack_api.collection.KeyValueMappedCollectionProxy):
+            if isinstance(attr, ftrack_api.attribute.KeyValueMappedCollectionAttribute):
                 for k, v in sorted(value.items()):
                     self.addItem(parent, k, v, v, session=session)
                 print(f'Finished loading {key!r} collection')
@@ -355,9 +358,9 @@ class FTrackExplorer(VFXWindow):
                 continue
 
             # Load cached value
-            if key in entityCache:
+            if key in cache:
                 print(f'Found {key!r} in cache...')
-                value = entityCache[key]
+                value = cache[key]
 
             # Fetch from server
             elif self.autoPopulate():
@@ -368,11 +371,11 @@ class FTrackExplorer(VFXWindow):
                     print(f'Failed to read {key!r}')
                     continue
                 else:
-                    entityCache[key] = value
+                    cache[key] = value
             else:
                 continue
             self.addItem(parent, key, value, entity, session=session)
-        print(f'Finished reading data from {entityStr}')
+        print(f'Finished reading data from {name}')
 
     def appendRow(self, parent, entityKey, entityValue='', entityType='', row=None):
         """Create a new row of QStandardItems."""
