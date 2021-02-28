@@ -429,9 +429,8 @@ class FTrackExplorer(VFXWindow):
             row = None
             if _loaded:
                 for i, k in enumerate(_loaded):
-                    if k[0] < key[0]:
+                    if k > key:
                         row = i
-                    else:
                         _loaded.insert(i, key)
                         break
 
@@ -442,10 +441,10 @@ class FTrackExplorer(VFXWindow):
         """Create a new row of QStandardItems."""
         item = QtGui.QStandardItem(entityKey)
         data = (item, QtGui.QStandardItem(entityValue), QtGui.QStandardItem(entityType))
-        if row:
-            parent.insertRow(row, data)
-        else:
+        if row is None:
             parent.appendRow(data)
+        else:
+            parent.insertRow(row, data)
         return item
 
     def addItem(self, parent, key, value, entity, row=None):
