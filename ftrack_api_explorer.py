@@ -305,6 +305,11 @@ class FTrackExplorer(VFXWindow):
         """Add a new FTrack entity.
         Optionally set key to load a child entity.
         """
+        if _loaded is None:
+            _loaded = []
+        else:
+            _loaded = list(sorted(_loaded))
+
         name = entityRepr(entity)
         cache = EntityCache(entity)
         attributes = type(entity).attributes
@@ -354,7 +359,7 @@ class FTrackExplorer(VFXWindow):
 
         # Load a new entity
         for key in sorted(keys):
-            if _loaded and key in _loaded:
+            if key in _loaded:
                 continue
 
             # Load cached value
@@ -374,7 +379,18 @@ class FTrackExplorer(VFXWindow):
                     cache[key] = value
             else:
                 continue
-            self.addItem(parent, key, value, entity, session=session)
+
+            # Insert in alphabetical order
+            row = None
+            if _loaded:
+                for i, k in enumerate(_loaded):
+                    if k[0] < key[0]:
+                        row = i
+                    else:
+                        _loaded.insert(i, key)
+                        break
+
+            self.addItem(parent, key, value, entity, row=row, session=session)
         print(f'Finished reading data from {name}')
 
     def appendRow(self, parent, entityKey, entityValue='', entityType='', row=None):
@@ -388,7 +404,7 @@ class FTrackExplorer(VFXWindow):
         return item
 
     @ftrack_session
-    def addItem(self, parent, key, value, entity, session=None):
+    def addItem(self, parent, key, value, entity, row=None, session=None):
         """Add an FTrack entity value.
 
         Parameters:
@@ -402,13 +418,13 @@ class FTrackExplorer(VFXWindow):
         className = value.__class__.__name__
 
         if isinstance(value, (list, tuple)):
-            child = self.appendRow(parent, key, '', className)
+            child = self.appendRow(parent, key, '', className, row=row)
             for i, v in enumerate(value):
                 k = str(i)
                 self.addItem(child, k, v, entity, session=session)
 
         elif isinstance(value, dict):
-            child = self.appendRow(parent, key, '', className)
+            child = self.appendRow(parent, key, '', className, row=row)
             for k, v in sorted(value.items()):
                 self.addItem(child, k, v, entity, session=session)
 
@@ -416,19 +432,19 @@ class FTrackExplorer(VFXWindow):
             entityStr = entityRepr(value)
             if key is None:
                 key, entityStr = entityStr, ''
-            child = self.appendRow(parent, key, entityStr, value.__class__.__name__)
+            child = self.appendRow(parent, key, entityStr, type(value).entity_type, row=row)
             self.addDummyItem(child, value, '', session=session)
 
         elif isinstance(value, ftrack_api.collection.Collection):
-            child = self.appendRow(parent, key, '', className)
+            child = self.appendRow(parent, key, '', className, row=row)
             self.addDummyItem(child, entity, key, session=session)
 
         elif isinstance(value, ftrack_api.collection.KeyValueMappedCollectionProxy):
-            child = self.appendRow(parent, key, '', className)
+            child = self.appendRow(parent, key, '', className, row=row)
             self.addDummyItem(child, entity, key, session=session)
 
         else:
-            child = self.appendRow(parent, key, str(value), className)
+            child = self.appendRow(parent, key, str(value), className, row=row)
         return child
 
     def addDummyItem(self, parent, entity, key, session=None):
