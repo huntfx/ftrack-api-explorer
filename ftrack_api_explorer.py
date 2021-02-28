@@ -70,7 +70,10 @@ class EntityCache(object):
 
     def __init__(self, entity):
         self.id = entityRepr(entity)
-        self.Entities[self.id] = entity
+
+        # Don't overwrite as it'll break if auto-populate is disabled
+        if self.id not in self.Entities:
+            self.Entities[self.id] = entity
 
     def __getitem__(self, key):
         return self.cache[key]
@@ -410,8 +413,8 @@ class FTrackExplorer(VFXWindow):
 
             # Load cached value
             if key in cache:
-                print(f'Found {key!r} in cache...')
                 value = cache[key]
+                print(f'Read {key!r} in cache...')
 
             # Fetch from server
             elif self.autoPopulate():
