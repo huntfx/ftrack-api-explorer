@@ -169,19 +169,26 @@ class QueryEdit(QtWidgets.QLineEdit):
         self._completerSet = False
 
     def setupCompleter(self):
+        if self._completerSet:
+            return False
         completer = QtWidgets.QCompleter()
         completer.setCaseSensitivity(QtCore.Qt.CaseInsensitive)
         self.setCompleter(completer)
         model = QtCore.QStringListModel()
         completer.setModel(model)
         model.setStringList(sorted(EntityCache.types()))
+        self._completerSet = True
+        return True
 
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
-        if not self._completerSet:
-            self.setupCompleter()
-            self._completerSet = True
+        self.setupCompleter()
         self.completer().complete()
+
+    def keyPressEvent(self, event):
+        super().keyPressEvent(event)
+        if self.setupCompleter():
+            self.completer().complete()
 
 
 class FTrackExplorer(VFXWindow):
