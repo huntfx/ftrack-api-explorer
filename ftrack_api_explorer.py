@@ -166,17 +166,21 @@ class QueryEdit(QtWidgets.QLineEdit):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setPlaceholderText('Type custom query here...')
+        self._completerSet = False
 
-    def setupCompleter(self, stringList):
+    def setupCompleter(self):
         completer = QtWidgets.QCompleter()
         completer.setCaseSensitivity(QtCore.Qt.CaseInsensitive)
         self.setCompleter(completer)
         model = QtCore.QStringListModel()
         completer.setModel(model)
-        model.setStringList(stringList)
+        model.setStringList(sorted(EntityCache.types()))
 
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
+        if not self._completerSet:
+            self.setupCompleter()
+            self._completerSet = True
         self.completer().complete()
 
 
@@ -215,7 +219,6 @@ class FTrackExplorer(VFXWindow):
         queryLabel = QtWidgets.QLabel('Query:')
         queryLayout.addWidget(queryLabel)
         self._queryText = QueryEdit()
-        self._queryText.setupCompleter(sorted(EntityCache.types()))
         queryLayout.addWidget(self._queryText)
         queryFirst = QtWidgets.QPushButton('Get First')
         queryLayout.addWidget(queryFirst)
