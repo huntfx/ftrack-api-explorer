@@ -1,3 +1,4 @@
+from collections import defaultdict
 from functools import wraps
 from threading import Thread
 
@@ -40,6 +41,50 @@ def entityRepr(entity, session=None):
     keys = [entity[k] for k in primaryKeys]
     args = ', '.join(f'{k}={v!r}' for k, v in zip(primaryKeys, keys))
     return f'{entity.__class__.__name__}({args})'
+
+
+def isKeyLoaded(entity, key):
+    """Determine if a key already contains a value."""
+    attrStorage = getattr(entity, '_ftrack_attribute_storage')
+    if attrStorage is None or key not in attrStorage:
+        return False
+    return attrStorage[key]['remote'] != ftrack_api.symbol.NOT_SET
+
+
+class EntityCache(object):
+    """Cache any entity values."""
+
+    __slots__ = ('id', 'cache')
+    Cache = defaultdict(dict)
+
+    def __init__(self, entityID):
+        self.id = entityID
+        self.cache = self.Cache[entityID]
+
+    def __getitem__(self, key):
+        return self.cache[key]
+
+    def __setitem__(self, key, value):
+        self.cache[key] = value
+
+    def __contains__(self, key):
+        return key in self.cache
+
+    @classmethod
+    def reset(cls):
+        """Remove all cache."""
+        cls.Cache = defaultdict(dict)
+
+    @classmethod
+    def load(cls, entity):
+        """Add an entity to cache."""
+        cache = cls(entity['id'])
+        for key in entity.keys():
+            if isKeyLoaded(entity, key):
+                cache[key] = entity[key]
+                if isinstance(entity[key], ftrack_api.collection.Collection):
+                    for collection in entity[key]:
+                        cls.addEntity(collection)
 
 
 class QueryEdit(QtWidgets.QLineEdit):
@@ -159,6 +204,7 @@ class FTrackExplorer(VFXWindow):
     def clear(self):
         """Remove all the data."""
         self._entityData.model().removeRows(0, self._entityData.model().rowCount())
+        EntityCache.reset()
 
     @QtCore.Slot(QtCore.QModelIndex)
     def populateChildren(self, index=None):
@@ -231,6 +277,7 @@ class FTrackExplorer(VFXWindow):
         Optionally set key to load a child entity.
         """
         entityStr = entityRepr(entity, session=session)
+        entityCache = EntityCache(entity['id'])
 
         # Add a new top level item
         if parent is None:
@@ -238,6 +285,7 @@ class FTrackExplorer(VFXWindow):
             parent = self.addItem(root, None, entity, entity, session=session)
             self.topLevelEntityAdded.emit()
             print(f'Found {entityStr}')
+            EntityCache.load(entity)
 
             # Stop here as we don't want to force load everything
             return
@@ -275,13 +323,19 @@ class FTrackExplorer(VFXWindow):
 
         # Load a new entity
         for key in sorted(keys):
-            print(f'Reading {key!r}...')
-            try:
-                value = entity[key]
-            except ftrack_api.exception.ServerError:
-                print(f'Failed to read {key!r}')
+            if key in entityCache:
+                print(f'Found {key!r} in cache...')
+                value = entityCache[key]
             else:
-                self.addItem(parent, key, value, entity, session=session)
+                print(f'Reading {key!r}...')
+                try:
+                    value = entity[key]
+                except ftrack_api.exception.ServerError:
+                    print(f'Failed to read {key!r}')
+                    continue
+                else:
+                    entityCache[key] = value
+            self.addItem(parent, key, value, entity, session=session)
         print(f'Finished reading data from {entityStr}')
 
     def appendRow(self, parent, entityKey, entityValue='', entityType=''):
