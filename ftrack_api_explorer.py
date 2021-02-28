@@ -263,15 +263,16 @@ class FTrackExplorer(VFXWindow):
 
         # Check if the items have already been populated
         if model.data(index, self.VisitRole) is not None:
+            populated = model.data(index, self.AutoPopulateRole)
 
             # Load the remaining entity keys if required
-            if not model.data(index, self.AutoPopulateRole) and self.autoPopulate():
+            # The EntityKeyRole check is to avoid reloading collections
+            if not populated and self.autoPopulate() and not model.data(index, self.EntityKeyRole):
                 parentType = model.data(index, self.EntityTypeRole)
                 parentPrimaryKeys = model.data(index, self.EntityPrimaryKeyRole).split(';')
-                childKey = model.data(index, self.EntityKeyRole)
                 item = model.itemFromIndex(index)
                 loaded = [item.child(row).text() for row in range(item.rowCount())]
-                self.loadEntity(parentType, parentPrimaryKeys, key=childKey, parent=item, _loaded=loaded)
+                self.loadEntity(parentType, parentPrimaryKeys, parent=item, _loaded=loaded)
                 model.setData(index, True, self.AutoPopulateRole)
 
         # Mark the item as visited
