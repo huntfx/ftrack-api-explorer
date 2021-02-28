@@ -30,16 +30,26 @@ def deferred(func):
     return wrapper
 
 
-def entityRepr(entity):
+def entityRepr(entityType, entityID=None):
     """Create a correct representation of an entity.
     >>> project = session.query('Project').first()
     >>> entityRepr(project)
     Project(id='12345678')
+    >>> entityRepr(session.types['Project'], '12345678')
+    Project(id='12345678')
     """
-    primaryKeys = type(entity).primary_key_attributes
-    keys = [entity[k] for k in primaryKeys]
-    args = ', '.join(f'{k}={v!r}' for k, v in zip(primaryKeys, keys))
-    return f'{entity.__class__.__name__}({args})'
+    if entityID is None:
+        entity, entityType = entityType, type(entityType)
+
+    primaryKeys = entityType.primary_key_attributes
+
+    if entityID is None:
+        entityID = [entity[k] for k in primaryKeys]
+    elif not isinstance(entityID, (list, tuple)):
+        entityID = [entityID]
+
+    args = ', '.join(f'{k}={v!r}' for k, v in zip(primaryKeys, entityID))
+    return f'{entityType.entity_type}({args})'
 
 
 def isKeyLoaded(entity, key):
@@ -55,9 +65,12 @@ class EntityCache(object):
 
     __slots__ = ('id',)
     Cache = defaultdict(dict)
+    Entities = {}
+    Types = {}
 
     def __init__(self, entity):
         self.id = entityRepr(entity)
+        self.Entities[self.id] = entity
 
     def __getitem__(self, key):
         return self.cache[key]
@@ -93,6 +106,24 @@ class EntityCache(object):
             elif isinstance(attr, ftrack_api.attribute.CollectionAttribute):
                 for child in entity[key]:
                     cls.load(child)
+
+    @classmethod
+    def types(cls, session=None):
+        """Cache the entity types to avoid opening more sessions."""
+        if not cls.Types:
+            print('Loading FTrack entity types...')
+            if session is not None:
+                cls.Types = session.types
+            else:
+                with ftrack_api.Session() as session:
+                    cls.Types = session.types
+                    return dict(cls.Types)
+        return dict(cls.Types)
+
+    @classmethod
+    def entity(cls, name):
+        """Get an entity from its name or return None."""
+        return cls.Entities.get(name)
 
 
 class QueryEdit(QtWidgets.QLineEdit):
@@ -150,7 +181,7 @@ class FTrackExplorer(VFXWindow):
         queryLabel = QtWidgets.QLabel('Query:')
         queryLayout.addWidget(queryLabel)
         self._queryText = QueryEdit()
-        self._queryText.setupCompleter(sorted(session.types))
+        self._queryText.setupCompleter(sorted(EntityCache.types(session=session)))
         queryLayout.addWidget(self._queryText)
         queryFirst = QtWidgets.QPushButton('Get First')
         queryLayout.addWidget(queryFirst)
@@ -192,7 +223,7 @@ class FTrackExplorer(VFXWindow):
         with ftrack_api.Session() as session:
             try:
                 for entity in session.query(query):
-                    self._loadEntity(entity, session=session)
+                    self._loadEntity(entity)
             except KeyError:
                 print(f'Invalid query: {query!r}')
                 return
@@ -212,7 +243,7 @@ class FTrackExplorer(VFXWindow):
                 print(f'Invalid query: {query!r}')
                 return
             if entity is not None:
-                self._loadEntity(entity, session=session)
+                self._loadEntity(entity)
 
     @QtCore.Slot()
     def entityTypeChanged(self):
@@ -273,35 +304,49 @@ class FTrackExplorer(VFXWindow):
             pass
 
     @deferred
-    @ftrack_session
-    def loadEntity(self, entityType, entityID, key=None, parent=None, _loaded=None, session=None):
+    def loadEntity(self, entityType, entityID, key=None, parent=None, _loaded=None):
         """Wrap the load function to allow multiple entities to be added."""
-        # Build a list of potential entities
-        if entityID:
-            entity = session.get(entityType, entityID)
-            if entity is None:
-                print(f'Could not find entity.')
-                return
-            entities = [entityID]
-        else:
-            entities = session.query(entityType)
+        session = None
 
-        # Add each entity to the GUI
-        for entity in entities:
-            if not isinstance(entity, ftrack_api.entity.base.Entity):
+        # Only start a session if not loading cached data
+        if self.autoPopulate():
+            session = ftrack_api.Session()
+
+            # Build a list of potential entities
+            if entityID:
                 entity = session.get(entityType, entityID)
                 if entity is None:
                     print(f'Could not find entity.')
-                    continue
+                    entities = []
+                else:
+                    entities = [entityID]
+            else:
+                entities = session.query(entityType)
 
+            # Load anything not yet loaded
+            for i, entity in enumerate(entities):
+                if not isinstance(entity, ftrack_api.entity.base.Entity):
+                    entities[i] = session.get(entityType, entityID)
+
+        # Load entity from cache
+        else:
+            name = entityRepr(EntityCache.types()[entityType], entityID)
+            entity = EntityCache.entity(name)
+            if entity is not None:
+                entities = [entity]
+
+        # Add each entity to the GUI
+        for entity in entities:
             try:
-                self._loadEntity(entity, key=key, parent=parent, _loaded=_loaded, session=session)
+                self._loadEntity(entity, key=key, parent=parent, _loaded=_loaded)
             # The GUI has likely refreshed so we can stop the query here
             except RuntimeError:
-                return
+                break
 
-    @ftrack_session
-    def _loadEntity(self, entity, key=None, parent=None, _loaded=None, session=None):
+        if session is not None:
+            session.close()
+
+    def _loadEntity(self, entity, key=None, parent=None, _loaded=None):
         """Add a new FTrack entity.
         Optionally set key to load a child entity.
         """
@@ -317,7 +362,7 @@ class FTrackExplorer(VFXWindow):
         # Add a new top level item
         if parent is None:
             root = self._entityData.model().invisibleRootItem()
-            parent = self.addItem(root, None, entity, entity, session=session)
+            parent = self.addItem(root, None, entity, entity)
             self.topLevelEntityAdded.emit()
             print(f'Found {name}')
             EntityCache.load(entity)
@@ -339,13 +384,13 @@ class FTrackExplorer(VFXWindow):
 
             if isinstance(attr, ftrack_api.attribute.CollectionAttribute):
                 for v in value:
-                    self.addItem(parent, None, v, v, session=session)
+                    self.addItem(parent, None, v, v)
                 print(f'Finished loading {key!r} collection')
                 return
 
             if isinstance(attr, ftrack_api.attribute.KeyValueMappedCollectionAttribute):
                 for k, v in sorted(value.items()):
-                    self.addItem(parent, k, v, v, session=session)
+                    self.addItem(parent, k, v, v)
                 print(f'Finished loading {key!r} collection')
                 return
 
@@ -354,7 +399,7 @@ class FTrackExplorer(VFXWindow):
 
         # I don't like to hardcode things, but project['descendants'] is slow as fuck
         # I'm disabling it for safety as it temporarily brought down the server
-        if isinstance(entity, session.types['Project']):
+        if type(entity).entity_type == 'Project':
             keys.remove('descendants')
 
         # Load a new entity
@@ -390,7 +435,7 @@ class FTrackExplorer(VFXWindow):
                         _loaded.insert(i, key)
                         break
 
-            self.addItem(parent, key, value, entity, row=row, session=session)
+            self.addItem(parent, key, value, entity, row=row)
         print(f'Finished reading data from {name}')
 
     def appendRow(self, parent, entityKey, entityValue='', entityType='', row=None):
@@ -403,8 +448,7 @@ class FTrackExplorer(VFXWindow):
             parent.appendRow(data)
         return item
 
-    @ftrack_session
-    def addItem(self, parent, key, value, entity, row=None, session=None):
+    def addItem(self, parent, key, value, entity, row=None):
         """Add an FTrack entity value.
 
         Parameters:
@@ -421,38 +465,38 @@ class FTrackExplorer(VFXWindow):
             child = self.appendRow(parent, key, '', className, row=row)
             for i, v in enumerate(value):
                 k = str(i)
-                self.addItem(child, k, v, entity, session=session)
+                self.addItem(child, k, v, entity)
 
         elif isinstance(value, dict):
             child = self.appendRow(parent, key, '', className, row=row)
             for k, v in sorted(value.items()):
-                self.addItem(child, k, v, entity, session=session)
+                self.addItem(child, k, v, entity)
 
         elif isinstance(value, ftrack_api.entity.base.Entity):
             entityStr = entityRepr(value)
             if key is None:
                 key, entityStr = entityStr, ''
             child = self.appendRow(parent, key, entityStr, type(value).entity_type, row=row)
-            self.addDummyItem(child, value, '', session=session)
+            self.addDummyItem(child, value, '')
 
         elif isinstance(value, ftrack_api.collection.Collection):
             child = self.appendRow(parent, key, '', className, row=row)
-            self.addDummyItem(child, entity, key, session=session)
+            self.addDummyItem(child, entity, key)
 
         elif isinstance(value, ftrack_api.collection.KeyValueMappedCollectionProxy):
             child = self.appendRow(parent, key, '', className, row=row)
-            self.addDummyItem(child, entity, key, session=session)
+            self.addDummyItem(child, entity, key)
 
         else:
             child = self.appendRow(parent, key, str(value), className, row=row)
         return child
 
-    def addDummyItem(self, parent, entity, key, session=None):
+    def addDummyItem(self, parent, entity, key):
         """Create a dummy item for things not yet loaded."""
         model = self._entityData.model()
 
         # Store data about the parent entities
-        primary_key_attributes = session.types[entity.__class__.__name__].primary_key_attributes
+        primary_key_attributes = type(entity).primary_key_attributes
         parentIndex = model.indexFromItem(parent)
         model.setData(parentIndex, True, self.DummyRole)
         model.setData(parentIndex, str(key), self.EntityKeyRole)
