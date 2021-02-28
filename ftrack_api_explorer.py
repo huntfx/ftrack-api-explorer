@@ -280,7 +280,8 @@ class FTrackExplorer(VFXWindow):
                 value = entity[key]
             except ftrack_api.exception.ServerError:
                 print(f'Failed to read {key!r}')
-            self.addItem(parent, key, value, entity, session=session)
+            else:
+                self.addItem(parent, key, value, entity, session=session)
         print(f'Finished reading data from {entityStr}')
 
     def appendRow(self, parent, entityKey, entityValue='', entityType=''):
