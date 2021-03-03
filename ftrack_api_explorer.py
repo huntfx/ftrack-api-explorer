@@ -1,5 +1,6 @@
 import os
 import requests
+import time
 import traceback
 from collections import defaultdict
 from functools import wraps
@@ -316,7 +317,7 @@ class FTrackExplorer(VFXWindow):
         else:
             self._entityProgress[entity][1] = progress
 
-    @QtCore.Slot()
+    @deferred
     @errorHandler
     def executeAll(self):
         """Get all the results of the query."""
@@ -331,11 +332,12 @@ class FTrackExplorer(VFXWindow):
             try:
                 for entity in session.query(query):
                     self._loadEntity(entity)
+                    time.sleep(0.01)  # Avoid blocking GUI updates
             except KeyError:
                 print(f'Invalid query: {query!r}')
                 return
 
-    @QtCore.Slot()
+    @deferred
     @errorHandler
     def executeFirst(self):
         """Get the first result of the query."""
