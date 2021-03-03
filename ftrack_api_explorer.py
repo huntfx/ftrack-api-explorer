@@ -509,20 +509,27 @@ class FTrackExplorer(VFXWindow):
 
         # Allow individual keys to be loaded
         if key:
+            self.entityLoading.emit(f'{name}[{key!r}]', 0)
             value = entity[key]
             attr = attributes.get(key)
             if isinstance(attr, ftrack_api.attribute.ReferenceAttribute):
                 entity = value
 
             if isinstance(attr, ftrack_api.attribute.CollectionAttribute):
-                for v in value:
+                total_values = len(value)
+                for i, v in enumerate(value):
+                    self.entityLoading.emit(f'{name}[{key!r}]', int(100 * i / total_values))
                     self.addItem(parent, None, v, v)
+                self.entityLoading.emit(f'{name}[{key!r}]', 100)
                 print(f'Finished loading {key!r} collection')
                 return
 
             if isinstance(attr, ftrack_api.attribute.KeyValueMappedCollectionAttribute):
-                for k, v in sorted(value.items()):
+                total_values = len(value)
+                for i, (k, v) in enumerate(sorted(value.items())):
+                    self.entityLoading.emit(f'{name}[{key!r}]', int(100 * i / total_values))
                     self.addItem(parent, k, v, v)
+                self.entityLoading.emit(f'{name}[{key!r}]', 100)
                 print(f'Finished loading {key!r} collection')
                 return
 
