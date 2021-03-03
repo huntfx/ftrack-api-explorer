@@ -41,8 +41,13 @@ def errorHandler(func):
                 except KeyError:
                     pass
 
-            self.errorInThread.emit(error, traceback.format_exc())
-            raise
+            # Send the error back to the GUI if possible
+            try:
+                self.errorInThread.emit(error, traceback.format_exc())
+            except RuntimeError:
+                pass
+            else:
+                raise
     return wrapper
 
 
