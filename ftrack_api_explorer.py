@@ -11,8 +11,8 @@ from Qt import QtCore, QtGui, QtWidgets
 from vfxwindow import VFXWindow
 
 
-def errorPopup(func):
-    """Create a popup if an error occurs."""
+def errorHandler(func):
+    """Catch any exception and emit it as a signal."""
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         try:
@@ -40,13 +40,7 @@ def errorPopup(func):
                 except KeyError:
                     pass
 
-            # Create a message box with the error
-            msg = QtWidgets.QMessageBox(self)
-            msg.setWindowTitle('Error')
-            msg.setText(error)
-            msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
-            msg.setDetailedText(traceback.format_exc())
-            msg.exec_()
+            self.errorInThread.emit(error, traceback.format_exc())
             raise
     return wrapper
 
@@ -142,7 +136,7 @@ class EntityCache(object):
                     cls.load(child)
 
     @classmethod
-    @errorPopup
+    @errorHandler
     def types(cls, session=None):
         """Cache the entity types to avoid opening more sessions."""
         if not cls.Types:
@@ -204,6 +198,7 @@ class FTrackExplorer(VFXWindow):
 
     topLevelEntityAdded = QtCore.Signal()
     entityLoading = QtCore.Signal(str, int)
+    errorInThread = QtCore.Signal(str, str)
 
     def __init__(self, parent=None, **kwargs):
         super().__init__(parent=parent, **kwargs)
@@ -255,6 +250,7 @@ class FTrackExplorer(VFXWindow):
 
         self._entityProgress = {}
         self.entityLoading.connect(self.updateEntityProgress)
+        self.errorInThread.connect(self.errorPopup)
 
         # Cache environment info
         # This is so a failed connection can delete a key while still
@@ -271,6 +267,15 @@ class FTrackExplorer(VFXWindow):
             self._ftrack_server = os.environ['FTRACK_SERVER']
         except KeyError:
             self._ftrack_server = 'https://company.ftrackapp.com'
+
+    def errorPopup(self, error, exc):
+        """Allow error popups to be triggered from threads."""
+        msg = QtWidgets.QMessageBox(self)
+        msg.setWindowTitle('Error')
+        msg.setText(error)
+        msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
+        msg.setDetailedText(exc)
+        msg.exec_()
 
     def autoPopulate(self):
         """Determine if auto population is allowed."""
@@ -302,7 +307,7 @@ class FTrackExplorer(VFXWindow):
             self._entityProgress[entity][1] = progress
 
     @QtCore.Slot()
-    @errorPopup
+    @errorHandler
     def executeAll(self):
         """Get all the results of the query."""
         query = self._queryText.text()
@@ -321,7 +326,7 @@ class FTrackExplorer(VFXWindow):
                 return
 
     @QtCore.Slot()
-    @errorPopup
+    @errorHandler
     def executeFirst(self):
         """Get the first result of the query."""
         query = self._queryText.text()
@@ -420,7 +425,7 @@ class FTrackExplorer(VFXWindow):
         createPopup('FTRACK_API_USER', 'username', self._ftrack_api_user)
 
     @deferred
-    @errorPopup
+    @errorHandler
     def loadEntity(self, entityType, entityID, key=None, parent=None, _loaded=None):
         """Wrap the load function to allow multiple entities to be added."""
         session = None
