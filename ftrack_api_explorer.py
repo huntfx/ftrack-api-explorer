@@ -85,6 +85,16 @@ def isKeyLoaded(entity, key):
     return attrStorage[key]['remote'] != ftrack_api.symbol.NOT_SET
 
 
+class Placeholders(object):
+    """Fake classes to use as placeholders."""
+
+    class Collection(object):
+        pass
+
+    class KeyValueMappedCollectionProxy(object):
+        pass
+
+
 class EntityCache(object):
     """Cache entity values."""
 
@@ -540,13 +550,23 @@ class FTrackExplorer(VFXWindow):
             # Fetch from server
             elif self.autoPopulate():
                 print(f'Reading {key!r}...')
-                try:
-                    value = entity[key]
-                except ftrack_api.exception.ServerError:
-                    print(f'Failed to read {key!r}')
-                    continue
+
+                # Avoid loading non scalar types at this stage
+                attr = attributes.get(key)
+                if isinstance(attr, ftrack_api.attribute.CollectionAttribute):
+                    value = Placeholders.Collection()
+
+                elif isinstance(attr, ftrack_api.attribute.KeyValueMappedCollectionAttribute):
+                    value = Placeholders.KeyValueMappedCollectionProxy()
+
                 else:
-                    cache[key] = value
+                    try:
+                        value = entity[key]
+                    except ftrack_api.exception.ServerError:
+                        print(f'Failed to read {key!r}')
+                        continue
+                    else:
+                        cache[key] = value
             else:
                 continue
 
@@ -584,7 +604,7 @@ class FTrackExplorer(VFXWindow):
                 This is used with the dummy items so that the child
                 entity can easily be queried later.
         """
-        className = value.__class__.__name__
+        className = type(value).__name__
 
         if isinstance(value, (list, tuple)):
             child = self.appendRow(parent, key, '', className, row=row)
@@ -604,11 +624,12 @@ class FTrackExplorer(VFXWindow):
             child = self.appendRow(parent, key, entityStr, type(value).entity_type, row=row)
             self.addDummyItem(child, value, '')
 
-        elif isinstance(value, ftrack_api.collection.Collection):
+        elif isinstance(value, (ftrack_api.collection.Collection, Placeholders.Collection)):
             child = self.appendRow(parent, key, '', className, row=row)
             self.addDummyItem(child, entity, key)
 
-        elif isinstance(value, ftrack_api.collection.KeyValueMappedCollectionProxy):
+        elif isinstance(value, (ftrack_api.collection.KeyValueMappedCollectionProxy,
+                                Placeholders.KeyValueMappedCollectionProxy)):
             child = self.appendRow(parent, key, '', className, row=row)
             self.addDummyItem(child, entity, key)
 
