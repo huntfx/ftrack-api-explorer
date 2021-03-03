@@ -510,25 +510,26 @@ class FTrackExplorer(VFXWindow):
         # Allow individual keys to be loaded
         if key:
             self.entityLoading.emit(f'{name}[{key!r}]', 0)
-            value = entity[key]
             attr = attributes.get(key)
+
+            # Load entities
             if isinstance(attr, ftrack_api.attribute.ReferenceAttribute):
-                entity = value
+                entity = entity[key]
 
-            if isinstance(attr, ftrack_api.attribute.CollectionAttribute):
+            # Load collections
+            else:
+                value = entity[key]
                 total_values = len(value)
-                for i, v in enumerate(value):
-                    self.entityLoading.emit(f'{name}[{key!r}]', int(100 * i / total_values))
-                    self.addItem(parent, None, v, v)
-                self.entityLoading.emit(f'{name}[{key!r}]', 100)
-                print(f'Finished loading {key!r} collection')
-                return
+                if isinstance(attr, ftrack_api.attribute.CollectionAttribute):
+                    for i, v in enumerate(value):
+                        self.entityLoading.emit(f'{name}[{key!r}]', int(100 * i / total_values))
+                        self.addItem(parent, None, v, v)
 
-            if isinstance(attr, ftrack_api.attribute.KeyValueMappedCollectionAttribute):
-                total_values = len(value)
-                for i, (k, v) in enumerate(sorted(value.items())):
-                    self.entityLoading.emit(f'{name}[{key!r}]', int(100 * i / total_values))
-                    self.addItem(parent, k, v, v)
+                elif isinstance(attr, ftrack_api.attribute.KeyValueMappedCollectionAttribute):
+                    for i, (k, v) in enumerate(sorted(value.items())):
+                        self.entityLoading.emit(f'{name}[{key!r}]', int(100 * i / total_values))
+                        self.addItem(parent, k, v, v)
+
                 self.entityLoading.emit(f'{name}[{key!r}]', 100)
                 print(f'Finished loading {key!r} collection')
                 return
