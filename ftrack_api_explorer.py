@@ -203,6 +203,7 @@ class FTrackExplorer(VFXWindow):
     AutoPopulateRole = QtCore.Qt.UserRole + 5
 
     topLevelEntityAdded = QtCore.Signal()
+    entityLoading = QtCore.Signal(str, int)
 
     def __init__(self, parent=None, **kwargs):
         super().__init__(parent=parent, **kwargs)
@@ -252,6 +253,9 @@ class FTrackExplorer(VFXWindow):
         queryAll.clicked.connect(self.executeAll)
         queryFirst.clicked.connect(self.executeFirst)
 
+        self._entityProgress = {}
+        self.entityLoading.connect(self.updateEntityProgress)
+
         # Cache environment info
         # This is so a failed connection can delete a key while still
         # remembering the original value
@@ -271,6 +275,31 @@ class FTrackExplorer(VFXWindow):
     def autoPopulate(self):
         """Determine if auto population is allowed."""
         return self._autoPopulate.isChecked()
+
+    @QtCore.Slot(str, int)
+    def updateEntityProgress(self, entity, progress):
+
+        # Reuse an existing progress bar
+        if entity in self._entityProgress:
+            progressBar = self._entityProgress[entity][0]
+
+        # Create a new progress bar
+        else:
+            progressBar = QtWidgets.QProgressBar()
+            progressBar.setRange(0, 100)
+            progressBar.setTextVisible(True)
+            progressBar.setFormat(f'Loading {entity}...')
+            self.centralWidget().layout().addWidget(progressBar)
+            self._entityProgress[entity] = [progressBar, progress]
+
+        progressBar.setValue(progress)
+
+        # Delete a finished progress bar
+        if progress == 100:
+            widget = self._entityProgress.pop(entity)[0]
+            widget.deleteLater()
+        else:
+            self._entityProgress[entity][1] = progress
 
     @QtCore.Slot()
     @errorPopup
@@ -491,7 +520,10 @@ class FTrackExplorer(VFXWindow):
             keys.remove('descendants')
 
         # Load a new entity
-        for key in sorted(keys):
+        total_keys = len(keys)
+        for i, key in enumerate(sorted(keys)):
+            self.entityLoading.emit(name, int(100 * i / total_keys))
+
             if key in _loaded:
                 continue
 
@@ -523,6 +555,7 @@ class FTrackExplorer(VFXWindow):
                         break
 
             self.addItem(parent, key, value, entity, row=row)
+        self.entityLoading.emit(name, 100)
         print(f'Finished reading data from {name}')
 
     def appendRow(self, parent, entityKey, entityValue='', entityType='', row=None):
