@@ -544,11 +544,6 @@ class FTrackExplorer(VFXWindow):
         # Load all keys
         keys = set(entity.keys())
 
-        # I don't like to hardcode things, but project['descendants'] is slow as fuck
-        # I'm disabling it for safety as it temporarily brought down the server
-        if type(entity).entity_type == 'Project':
-            keys.remove('descendants')
-
         # Load a new entity
         total_keys = len(keys)
         for i, key in enumerate(sorted(keys)):
