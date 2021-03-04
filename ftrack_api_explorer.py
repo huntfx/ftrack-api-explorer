@@ -91,6 +91,37 @@ def isKeyLoaded(entity, key):
     return attrStorage[key]['remote'] != ftrack_api.symbol.NOT_SET
 
 
+class BusyProgressBar(QtWidgets.QWidget):
+    """Allow text to be displayed on a busy progress bar."""
+    def __init__(self, parent=None):
+        super().__init__(parent=parent)
+
+        grid = QtWidgets.QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(grid)
+
+        self._progressBar = QtWidgets.QProgressBar()
+        self._progressBar.setRange(0, 0)
+        grid.addWidget(self._progressBar, 0, 0)
+
+        self._label = QtWidgets.QLabel('test')
+        self._label.setAlignment(QtCore.Qt.AlignCenter)
+        self._label.setStyleSheet('color:black')
+        grid.addWidget(self._label, 0, 0)
+
+    def progressBar(self):
+        return self._progressBar
+
+    def label(self):
+        return self._label
+
+    def setValue(self, value):
+        self._progressBar.setValue(value)
+
+    def setFormat(self, format):
+        self._label.setText(format)
+
+
 class Placeholders(object):
     """Fake classes to use as placeholders."""
 
@@ -250,6 +281,10 @@ class FTrackExplorer(VFXWindow):
         entityDataModel.setHorizontalHeaderLabels(('Key', 'Value', 'Type'))
         self._entityData.setModel(entityDataModel)
 
+        self._progressArea = QtWidgets.QVBoxLayout()
+        self._progressArea.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(self._progressArea)
+
         footer = QtWidgets.QHBoxLayout()
         layout.addLayout(footer)
         footer.addStretch()
@@ -264,6 +299,7 @@ class FTrackExplorer(VFXWindow):
         queryAll.clicked.connect(self.executeAll)
         queryFirst.clicked.connect(self.executeFirst)
 
+        self._queryCounter = 0
         self._entityProgress = {}
         self.entityLoading.connect(self.updateEntityProgress)
         self.errorInThread.connect(self.errorPopup)
@@ -306,11 +342,15 @@ class FTrackExplorer(VFXWindow):
 
         # Create a new progress bar
         else:
-            progressBar = QtWidgets.QProgressBar()
-            progressBar.setRange(0, 100)
-            progressBar.setTextVisible(True)
+            if progress < 0:
+                progressBar = BusyProgressBar()
+            else:
+                progressBar = QtWidgets.QProgressBar()
+                progressBar.setRange(0, 100)
+                progressBar.setTextVisible(True)
             progressBar.setFormat(f'Loading {entity}...')
-            self.centralWidget().layout().addWidget(progressBar)
+
+            self._progressArea.addWidget(progressBar)
             self._entityProgress[entity] = [progressBar, progress]
 
         progressBar.setValue(progress)
@@ -333,6 +373,9 @@ class FTrackExplorer(VFXWindow):
         self.checkCredentials()
 
         print(f'Executing {query!r}...')
+        self._queryCounter += 1
+        progressName = f'query {self._queryCounter} ({query})'
+        self.entityLoading.emit(progressName, -1)
         with ftrack_api.Session() as session:
             try:
                 for entity in session.query(query):
@@ -340,7 +383,7 @@ class FTrackExplorer(VFXWindow):
                     time.sleep(0.01)  # Avoid blocking GUI updates
             except KeyError:
                 print(f'Invalid query: {query!r}')
-                return
+        self.entityLoading.emit(progressName, 100)
 
     @deferred
     @errorHandler
@@ -353,14 +396,18 @@ class FTrackExplorer(VFXWindow):
         self.checkCredentials()
 
         print(f'Executing {query!r}...')
+        self._queryCounter += 1
+        progressName = f'query {self._queryCounter}: ({query})'
+        self.entityLoading.emit(progressName, 0)
         with ftrack_api.Session() as session:
             try:
                 entity = session.query(query).first()
             except KeyError:
                 print(f'Invalid query: {query!r}')
-                return
+                pass
             if entity is not None:
                 self._loadEntity(entity)
+        self.entityLoading.emit(progressName, 100)
 
     @QtCore.Slot()
     def entityTypeChanged(self):
