@@ -404,9 +404,9 @@ class FTrackExplorer(VFXWindow):
                 entity = session.query(query).first()
             except KeyError:
                 print(f'Invalid query: {query!r}')
-                pass
-            if entity is not None:
-                self._loadEntity(entity)
+            else:
+                if entity is not None:
+                    self._loadEntity(entity)
         self.entityLoading.emit(progressName, 100)
 
     @QtCore.Slot()
