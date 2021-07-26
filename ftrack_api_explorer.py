@@ -20,7 +20,10 @@ def errorHandler(func):
             return func(self, *args, **kwargs)
 
         except Exception as e:
-            error = str(e)
+            try:
+                error = str(e)
+            except KeyError:
+                error = 'Server reported error: An unknown error occurred.'
 
             # Handle ftrack server errors
             if isinstance(e, ftrack_api.exception.ServerError):
