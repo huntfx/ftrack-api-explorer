@@ -381,7 +381,7 @@ class FTrackExplorer(VFXWindow):
                 for entity in session.query(query):
                     self._loadEntity(entity)
                     time.sleep(0.01)  # Avoid blocking GUI updates
-            except KeyError:
+            except (KeyError, ftrack_api.exception.ServerError):
                 print(f'Invalid query: {query!r}')
         self.entityLoading.emit(progressName, 100)
 
@@ -402,7 +402,7 @@ class FTrackExplorer(VFXWindow):
         with ftrack_api.Session() as session:
             try:
                 entity = session.query(query).first()
-            except KeyError:
+            except (KeyError, ftrack_api.exception.ServerError):
                 print(f'Invalid query: {query!r}')
             else:
                 if entity is not None:
