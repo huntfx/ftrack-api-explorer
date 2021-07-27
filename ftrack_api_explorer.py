@@ -23,7 +23,9 @@ def errorHandler(func):
             try:
                 error = str(e)
             except KeyError:
-                error = 'Server reported error: An unknown error occurred.'
+                if not isinstance(e, ftrack_api.exception.ServerError):
+                    raise
+                error = 'Server reported error: An unknown server error occurred.'
 
             # Handle ftrack server errors
             if isinstance(e, ftrack_api.exception.ServerError):
