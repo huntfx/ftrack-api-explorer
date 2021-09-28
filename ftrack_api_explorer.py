@@ -709,7 +709,7 @@ class FTrackExplorer(VFXWindow):
         model.setData(parentIndex, True, self.DummyRole)
         model.setData(parentIndex, str(key), self.EntityKeyRole)
         model.setData(parentIndex, str(entity.__class__.__name__), self.EntityTypeRole)
-        model.setData(parentIndex, ';'.join(entity[k] for k in map(str, primary_key_attributes)), self.EntityPrimaryKeyRole)
+        model.setData(parentIndex, ';'.join(str(entity[k]) for k in map(str, primary_key_attributes)), self.EntityPrimaryKeyRole)
 
         # Create the dummy item
         item = QtGui.QStandardItem('<not loaded>')
