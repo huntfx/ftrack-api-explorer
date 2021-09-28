@@ -1,0 +1,3 @@
+ftrack_python_api
+Qt.py
+vfxwindow
