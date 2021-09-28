@@ -2,6 +2,7 @@ import os
 import requests
 import time
 import traceback
+import uuid
 from collections import defaultdict
 from functools import wraps
 from getpass import getuser
@@ -10,6 +11,23 @@ from threading import Thread
 import ftrack_api
 from Qt import QtCore, QtGui, QtWidgets
 from vfxwindow import VFXWindow
+
+
+_ID_REMAP = {}
+
+
+def remapID(entityID):
+    """Remap any IDs to avoid exposing them in screenshots."""
+    try:
+        uuid.UUID(entityID)
+    except ValueError:
+        return entityID
+
+    try:
+        return _ID_REMAP[entityID]
+    except KeyError:
+        newID = _ID_REMAP[entityID] = str(uuid.uuid4())
+    return newID
 
 
 def errorHandler(func):
@@ -66,7 +84,7 @@ def deferred(func):
     return wrapper
 
 
-def entityRepr(entityType, entityID=None):
+def entityRepr(entityType, entityID=None, remapIDs=False):
     """Create a correct representation of an entity.
     >>> project = session.query('Project').first()
     >>> entityRepr(project)
@@ -84,6 +102,9 @@ def entityRepr(entityType, entityID=None):
     elif not isinstance(entityID, (list, tuple)):
         entityID = [entityID]
 
+    # Generate an accurate representation of the entity
+    if remapIDs:
+        entityID = map(remapID, entityID)
     args = ', '.join(f'{k}={v!r}' for k, v in zip(primaryKeys, entityID))
     return f'{entityType.entity_type}({args})'
 
@@ -128,7 +149,10 @@ class BusyProgressBar(QtWidgets.QWidget):
 
 
 class Placeholders(object):
-    """Fake classes to use as placeholders."""
+    """Fake classes to use as placeholders.
+    The purpose of this is for the dummy items, so they can be replaced
+    once the parent item is expanded.
+    """
 
     class Collection(object):
         pass
@@ -145,8 +169,8 @@ class EntityCache(object):
     Entities = {}
     Types = {}
 
-    def __init__(self, entity):
-        self.id = entityRepr(entity)
+    def __init__(self, entity, remapIDs=False):
+        self.id = entityRepr(entity, remapIDs=remapIDs)
 
         # Don't overwrite as it'll break if auto-populate is disabled
         if self.id not in self.Entities:
@@ -171,9 +195,9 @@ class EntityCache(object):
         cls.Cache = defaultdict(dict)
 
     @classmethod
-    def load(cls, entity):
+    def load(cls, entity, remapIDs=False):
         """Add an entity to cache."""
-        cache = cls(entity)
+        cache = cls(entity, remapIDs=remapIDs)
         attributes = type(entity).attributes
         for key in entity.keys():
             if not isKeyLoaded(entity, key):
@@ -262,6 +286,10 @@ class FTrackExplorer(VFXWindow):
         self._autoPopulate.setCheckable(True)
         self._autoPopulate.setChecked(True)
         options.addAction(self._autoPopulate)
+        self._remapIDs = QtWidgets.QAction('Remap ID primary keys')
+        self._remapIDs.setCheckable(True)
+        self._remapIDs.setChecked(False)
+        options.addAction(self._remapIDs)
 
         # Build layout
         layout = QtWidgets.QVBoxLayout()
@@ -337,6 +365,10 @@ class FTrackExplorer(VFXWindow):
     def autoPopulate(self):
         """Determine if auto population is allowed."""
         return self._autoPopulate.isChecked()
+
+    def remapIDs(self):
+        """Determine if remapping IDs is required."""
+        return self._remapIDs.isChecked()
 
     @QtCore.Slot(str, int)
     def updateEntityProgress(self, entity, progress):
@@ -521,7 +553,7 @@ class FTrackExplorer(VFXWindow):
 
         # Load entity from cache
         else:
-            name = entityRepr(EntityCache.types()[entityType], entityID)
+            name = entityRepr(EntityCache.types()[entityType], entityID, remapIDs=self.remapIDs())
             entity = EntityCache.entity(name)
             if entity is not None:
                 entities = [entity]
@@ -546,8 +578,8 @@ class FTrackExplorer(VFXWindow):
         else:
             _loaded = list(sorted(_loaded))
 
-        name = entityRepr(entity)
-        cache = EntityCache(entity)
+        cache = EntityCache(entity, remapIDs=self.remapIDs())
+        name = cache.id
         attributes = type(entity).attributes
 
         # Add a new top level item
@@ -556,7 +588,7 @@ class FTrackExplorer(VFXWindow):
             parent = self.addItem(root, None, entity, entity)
             self.topLevelEntityAdded.emit()
             print(f'Found {name}')
-            EntityCache.load(entity)
+            EntityCache.load(entity, remapIDs=self.remapIDs())
 
             # Stop here as we don't want to force load everything
             return
@@ -607,7 +639,7 @@ class FTrackExplorer(VFXWindow):
             # Load cached value
             if key in cache:
                 value = cache[key]
-                print(f'Read {key!r} in cache...')
+                print(f'Read {key!r} from cache...')
 
             # Fetch from server
             elif self.autoPopulate():
@@ -647,6 +679,9 @@ class FTrackExplorer(VFXWindow):
 
     def appendRow(self, parent, entityKey, entityValue='', entityType='', row=None):
         """Create a new row of QStandardItems."""
+        if self.remapIDs():
+            entityValue = remapID(entityValue)
+
         item = QtGui.QStandardItem(entityKey)
         data = (item, QtGui.QStandardItem(entityValue), QtGui.QStandardItem(entityType))
         if row is None:
@@ -680,7 +715,7 @@ class FTrackExplorer(VFXWindow):
                 self.addItem(child, k, v, entity)
 
         elif isinstance(value, ftrack_api.entity.base.Entity):
-            entityStr = entityRepr(value)
+            entityStr = entityRepr(value, remapIDs=self.remapIDs())
             if key is None:
                 key, entityStr = entityStr, ''
             child = self.appendRow(parent, key, entityStr, type(value).entity_type, row=row)
